@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTC Platform Demo</title>
+<script src="https://cdn.jsdelivr.net/npm/mediasoup-client@3.14.3/lib/index.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 16px; }
+h1 { font-size: 18px; margin-bottom: 12px; }
+#controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+input, button { padding: 8px 14px; border: 1px solid #444; background: #16213e; color: #eee; border-radius: 4px; font-size: 14px; }
+button { cursor: pointer; }
+button:hover { background: #0f3460; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+#status { font-size: 13px; color: #aaa; margin-bottom: 12px; }
+#grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.card { background: #16213e; border: 1px solid #333; border-radius: 6px; overflow: hidden; position: relative; }
+.card video { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: #000; display: block; }
+.card .label { position: absolute; top: 6px; left: 6px; font-size: 12px; background: rgba(0,0,0,0.6); padding: 2px 8px; border-radius: 3px; }
+.card .muted { position: absolute; bottom: 6px; right: 6px; font-size: 12px; color: #f66; }
+.empty { grid-column: 1 / -1; text-align: center; color: #666; padding: 40px; }
+#log { margin-top: 16px; font-size: 12px; font-family: monospace; color: #888; max-height: 200px; overflow-y: auto; background: #111; padding: 8px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>RTC Platform - 连麦 Demo</h1>
+<div id="controls">
+  <input id="roomId" placeholder="房间 ID" value="demo-room">
+  <input id="displayName" placeholder="昵称" value="">
+  <button id="btnJoin">加入房间</button>
+  <button id="btnLeave" disabled>离开</button>
+  <button id="btnToggleCam" disabled>关闭摄像头</button>
+  <button id="btnToggleMic" disabled>静音</button>
+  <button id="btnRequestMic" disabled>申请上麦</button>
+</div>
+<div id="status">未连接</div>
+<div id="grid"></div>
+<div id="log"></div>
+
+<script>
+const { Device } = window.mediasoupClient || window;
+const $ = (id) => document.getElementById(id);
+const log = (msg) => {
+  const el = $('log');
+  el.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+};
+
+let client = null;
+let localStream = null;
+let camEnabled = true;
+let micEnabled = true;
+
+// 远端渲染: peerId → { video: {stream, card}, audio: {stream, card} }
+const remoteCards = new Map();
+
+// ---- 加入房间 ----
+$('btnJoin').onclick = async () => {
+  const roomId = $('roomId').value.trim();
+  if (!roomId) return alert('请输入房间 ID');
+  $('btnJoin').disabled = true;
+  $('status').textContent = `正在加入 ${roomId}...`;
+
+  // 动态创建 RTCClient（内联 SDK; 生产走 npm 打包）
+  client = createClient();
+
+  try {
+    const result = await client.join({
+      roomId,
+      displayName: $('displayName').value.trim() || '用户' + Math.floor(Math.random()*1000),
+      serverUrl: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=dev`,
+      sfuUrl: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/sfu-ws`,
+    });
+    log(`join ok: peerId=${result.peerId}`);
+    $('status').textContent = `peerId=${result.peerId} | roomId=${roomId}`;
+
+    // 采集本地媒体
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    await client.publish(localStream);
+    addVideoCard(result.peerId, localStream, '我', true);
+
+    // 渲染已有 peers
+    for (const peer of result.peers) {
+      if (peer.peerId === result.peerId) continue;
+      for (const prod of peer.producers || []) {
+        // SDK 内部会触发 streamAdded
+      }
+    }
+
+    $('btnLeave').disabled = false;
+    $('btnToggleCam').disabled = false;
+    $('btnToggleMic').disabled = false;
+  } catch (e) {
+    log(`join error: ${e.message}`);
+    $('status').textContent = `加入失败: ${e.message}`;
+    $('btnJoin').disabled = false;
+  }
+};
+
+// ---- 离开 ----
+$('btnLeave').onclick = async () => {
+  if (!client) return;
+  await client.leave();
+  $('grid').innerHTML = '';
+  remoteCards.clear();
+  $('btnJoin').disabled = false;
+  $('btnLeave').disabled = true;
+  $('btnToggleCam').disabled = true;
+  $('btnToggleMic').disabled = true;
+  $('status').textContent = '未连接';
+  log('left room');
+};
+
+// ---- 摄像头开关 ----
+$('btnToggleCam').onclick = async () => {
+  if (!localStream) return;
+  camEnabled = !camEnabled;
+  localStream.getVideoTracks()[0].enabled = camEnabled;
+  if (camEnabled) { await client.resumeProducer('video'); $('btnToggleCam').textContent = '关闭摄像头'; }
+  else { await client.pauseProducer('video'); $('btnToggleCam').textContent = '开启摄像头'; }
+};
+
+// ---- 麦克风开关 ----
+$('btnToggleMic').onclick = async () => {
+  if (!localStream) return;
+  micEnabled = !micEnabled;
+  localStream.getAudioTracks()[0].enabled = micEnabled;
+  if (micEnabled) { await client.resumeProducer('audio'); $('btnToggleMic').textContent = '静音'; }
+  else { await client.pauseProducer('audio'); $('btnToggleMic').textContent = '取消静音'; }
+};
+
+// ---- 申请上麦（观众角色用）----
+$('btnRequestMic').onclick = async () => {
+  if (!client) return;
+  await client.requestMic();
+  log('mic requested');
+};
+
+// ---- 视频卡片管理 ----
+function addVideoCard(peerId, stream, label, isLocal = false) {
+  if (document.getElementById(`card-${peerId}`)) return;
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = `card-${peerId}`;
+  const video = document.createElement('video');
+  video.autoplay = true;
+  video.playsInline = true;
+  video.muted = isLocal; // 本地不回放音频
+  video.srcObject = stream;
+  const tag = document.createElement('div');
+  tag.className = 'label';
+  tag.textContent = `${label} (${peerId.slice(0, 8)}...)`;
+  card.appendChild(video);
+  card.appendChild(tag);
+  $('grid').appendChild(card);
+}
+
+function removeVideoCard(peerId) {
+  const card = document.getElementById(`card-${peerId}`);
+  if (card) card.remove();
+}
+
+// ---- 创建 RTCClient（内联实现，等价 web/sdk/index.ts）----
+function createClient() {
+  // mediasoup-client 依赖检查
+  if (!window.mediasoupClient && !window.Device) {
+    throw new Error('mediasoup-client not loaded');
+  }
+  const DeviceCtor = window.mediasoupClient?.Device || window.Device;
+
+  let signalWs = null, sfuWs = null;
+  let device = null, pubTransport = null, subTransport = null;
+  let producers = new Map(), consumers = new Map();
+  let peerId = '', roomId = '';
+  let reqCounter = 0;
+  const pending = new Map();
+
+  const nextReq = () => `r-${++reqCounter}`;
+
+  const wsRequest = (ws, type, roomIdArg, payload) => new Promise((resolve, reject) => {
+    const reqId = nextReq();
+    const timer = setTimeout(() => { pending.delete(reqId); reject(new Error(type + ' timeout')); }, 8000);
+    pending.set(reqId, { resolve, timer });
+    ws.send(JSON.stringify({ type, roomId: roomIdArg, reqId, payload }));
+  });
+
+  const onMessage = (ws, isSfu) => (ev) => {
+    const env = JSON.parse(ev.data);
+    if (env.reqId && pending.has(env.reqId)) {
+      const { resolve, timer } = pending.get(env.reqId);
+      clearTimeout(timer); pending.delete(env.reqId);
+      if (env.code === 0) resolve(env.payload || {});
+      else if (isSfu) resolve(env); // sfu 层 resolve envelope 让上层判断
+      else resolve(env.payload || {});
+      return;
+    }
+    if (!isSfu) return;
+    switch (env.type) {
+      case 'newProducer': {
+        const { peerId: remotePid, producerId, kind } = env.payload;
+        if (remotePid === peerId) return;
+        doConsume(remotePid, producerId, kind);
+        break;
+      }
+      case 'producerClosed': {
+        closeConsumerByProducer(env.payload.producerId);
+        break;
+      }
+      case 'producerPaused':
+        log(`producer paused: ${JSON.stringify(env.payload)}`);
+        break;
+      case 'producerResumed':
+        log(`producer resumed: ${JSON.stringify(env.payload)}`);
+        break;
+    }
+  };
+
+  const closeConsumerByProducer = (producerId) => {
+    for (const [cid, c] of consumers) {
+      if (c.producerId === producerId) {
+        c.close(); consumers.delete(cid);
+        removeVideoCard(findPeerIdByProducer(producerId));
+        break;
+      }
+    }
+  };
+  const producerToPeer = new Map();
+
+  const doConsume = async (remotePid, producerId, kind) => {
+    if (!subTransport || !device) return;
+    try {
+      const resp = await wsRequest(sfuWs, 'consume', roomId, {
+        transportId: subTransport.id, producerId,
+        rtpCapabilities: device.rtpCapabilities,
+      });
+      if (resp.code !== 0) { log(`consume err: ${resp.msg}`); return; }
+      const c = await subTransport.consume({
+        id: resp.id, producerId: resp.producerId, kind: resp.kind,
+        rtpParameters: resp.rtpParameters,
+      });
+      consumers.set(c.id, c);
+      producerToPeer.set(producerId, remotePid);
+      c.on('transportclose', () => consumers.delete(c.id));
+      const stream = new MediaStream([c.track]);
+      addVideoCard(remotePid, stream, '对方', false);
+      await wsRequest(sfuWs, 'resumeConsumer', roomId, { consumerId: c.id });
+      log(`consumed ${kind} from ${remotePid}`);
+    } catch (e) {
+      log(`consume error: ${e.message}`);
+    }
+  };
+
+  const findPeerIdByProducer = (producerId) => producerToPeer.get(producerId) || '';
+
+  return {
+    async join({ roomId: rid, displayName, role, serverUrl, sfuUrl }) {
+      roomId = rid;
+      // signal ws
+      await new Promise((res, rej) => {
+        signalWs = new WebSocket(serverUrl);
+        signalWs.onopen = res;
+        signalWs.onerror = () => rej(new Error('signal WS error'));
+        signalWs.onmessage = onMessage(signalWs, false);
+      });
+      // join
+      const joinResp = await wsRequest(signalWs, 'join', rid, { displayName, role });
+      if (joinResp.code !== 0) throw new Error(joinResp.msg || 'join failed');
+      peerId = joinResp.peerId;
+      const rtpCaps = joinResp.rtpCapabilities;
+      if (!rtpCaps) {
+        // signal-gw 还没有 router caps，等 SFU 连接时拿
+      }
+      // sfu ws
+      await new Promise((res, rej) => {
+        const u = sfuUrl + (sfuUrl.includes('?') ? '&' : '?') + `peerId=${peerId}&roomId=${rid}`;
+        sfuWs = new WebSocket(u);
+        sfuWs.onopen = res;
+        sfuWs.onerror = () => rej(new Error('SFU WS error'));
+        sfuWs.onmessage = (ev) => {
+          const env = JSON.parse(ev.data);
+          // rtpCapabilities 推送
+          if (env.type === 'rtpCapabilities' && !device) {
+            device = new DeviceCtor();
+            device.load({ routerRtpCapabilities: env.payload.rtpCapabilities })
+              .then(() => log('device loaded'))
+              .catch(e => log(`device.load error: ${e.message}`));
+            return;
+          }
+          onMessage(sfuWs, true)(ev);
+        };
+      });
+      // 等 device ready
+      await new Promise(res => setTimeout(res, 500)); // Phase 1: 等 device.load 完成
+
+      // createTransport
+      const [pubInfo, subInfo] = await Promise.all([
+        wsRequest(sfuWs, 'createTransport', rid, { direction: 'pub' }),
+        wsRequest(sfuWs, 'createTransport', rid, { direction: 'sub' }),
+      ]);
+      pubTransport = device.createSendTransport(pubInfo);
+      subTransport = device.createRecvTransport(subInfo);
+      pubTransport.on('connect', ({ dtlsParameters }, cb, eb) => {
+        wsRequest(sfuWs, 'connectTransport', rid, { transportId: pubTransport.id, dtlsParameters })
+          .then(r => r.code === 0 ? cb() : eb(new Error(r.msg))).catch(eb);
+      });
+      subTransport.on('connect', ({ dtlsParameters }, cb, eb) => {
+        wsRequest(sfuWs, 'connectTransport', rid, { transportId: subTransport.id, dtlsParameters })
+          .then(r => r.code === 0 ? cb() : eb(new Error(r.msg))).catch(eb);
+      });
+      pubTransport.on('produce', ({ kind, rtpParameters }, cb, eb) => {
+        wsRequest(sfuWs, 'produce', rid, { transportId: pubTransport.id, kind, rtpParameters })
+          .then(r => r.code === 0 ? cb({ id: r.producerId }) : eb(new Error(r.msg))).catch(eb);
+      });
+      // 消费已有 peers
+      for (const peer of joinResp.peers || []) {
+        if (peer.peerId === peerId) continue;
+        for (const prod of peer.producers || []) {
+          doConsume(peer.peerId, prod.producerId, prod.kind);
+        }
+      }
+      return { peerId, rtpCapabilities: rtpCaps, peers: joinResp.peers || [] };
+    },
+    async publish(stream) {
+      const result = { audioProducerId: '', videoProducerId: '' };
+      for (const track of stream.getTracks()) {
+        const p = await pubTransport.produce({ track });
+        producers.set(track.kind, p);
+        if (track.kind === 'audio') result.audioProducerId = p.id;
+        else result.videoProducerId = p.id;
+      }
+      return result;
+    },
+    async pauseProducer(kind) {
+      const p = producers.get(kind);
+      if (!p) return;
+      p.pause();
+      sfuWs.send(JSON.stringify({ type: 'pauseProducer', roomId, peerId, payload: { producerId: p.id } }));
+    },
+    async resumeProducer(kind) {
+      const p = producers.get(kind);
+      if (!p) return;
+      p.resume();
+      sfuWs.send(JSON.stringify({ type: 'resumeProducer', roomId, peerId, payload: { producerId: p.id } }));
+    },
+    async requestMic() {
+      signalWs.send(JSON.stringify({ type: 'requestMic', roomId, peerId, payload: {} }));
+    },
+    async leave() {
+      for (const [, p] of producers) p.close();
+      for (const [, c] of consumers) c.close();
+      pubTransport?.close(); subTransport?.close();
+      signalWs?.close(); sfuWs?.close();
+    },
+    getPeerId: () => peerId,
+  };
+}
+</script>
+</body>
+</html>
