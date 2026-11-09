@@ -1,0 +1,18 @@
+# coturn 一键部署（docker compose up -d）
+# 前置：
+#   1. 修改 turnserver.conf：external-ip=你的公网IP、static-auth-secret=随机长串
+#   2. TLS 证书（turns 用，可选）：Let's Encrypt 证书放 ./certs/
+#      若暂不用 TLS，注释掉 turnserver.conf 里 cert/pkey 两行即可
+# 防火墙放行：
+#   3478/udp 3478/tcp 5349/tcp 49160-49200/udp
+services:
+  coturn:
+    image: coturn/coturn:latest
+    container_name: coturn
+    # host 网络模式：中继端口段无需逐个映射（推荐；Docker Desktop/某些环境不支持时
+    # 改用端口映射并缩小 min-port/max-port）
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./certs:/etc/coturn/certs:ro
+    restart: unless-stopped

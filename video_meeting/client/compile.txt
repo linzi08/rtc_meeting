@@ -1,0 +1,74 @@
+
+编译IXWebSocket
+
+cmake -G Ninja ^
+  -DCMAKE_MAKE_PROGRAM="D:/webrtc/src/buildtools/win/ninja.exe" ^
+  -DCMAKE_C_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_CXX_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_BUILD_TYPE=Release ^
+  -DUSE_TLS=ON ^
+  -DUSE_OPEN_SSL=ON ^
+  -DUSE_MBED_TLS=OFF ^
+  -DUSE_ZLIB=OFF ^
+  -DOPENSSL_ROOT_DIR="C:/Program Files/OpenSSL Library/openssl-4.1" ^
+  -DOPENSSL_INCLUDE_DIR="C:/Program Files/OpenSSL Library/openssl-4.1/include" ^
+  -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded" ^
+  ..
+  
+  cmake -B build -G Ninja ^
+  -DCMAKE_MAKE_PROGRAM="D:/webrtc/src/buildtools/win/ninja.exe" ^
+  -DCMAKE_C_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_CXX_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_BUILD_TYPE=Release ^
+  -DUSE_OPEN_SSL=ON ^
+  -DOPENSSL_FOUND=TRUE ^
+  -DUSE_MBED_TLS=OFF ^
+  -DUSE_ZLIB=OFF ^
+  -DUSE_TLS=ON ^
+  -DOPENSSL_INCLUDE_DIR="D:/webrtc/src/third_party/boringssl/src/include" ^
+  -DOPENSSL_LIBRARIES="D:/webrtc/src/out/Default/obj/webrtc.lib"
+  -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
+  
+  cmake -B build -G Ninja ^
+  -DCMAKE_MAKE_PROGRAM="D:/webrtc/src/buildtools/win/ninja.exe" ^
+  -DCMAKE_C_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_CXX_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_BUILD_TYPE=Release ^
+  -DUSE_TLS=ON ^
+  -DUSE_OPEN_SSL=ON ^
+  -DUSE_MBED_TLS=OFF ^
+  -DOPENSSL_FOUND=TRUE ^
+  -DUSE_ZLIB=OFF ^
+  -DUSE_TLS=ON ^
+  -DOPENSSL_INCLUDE_DIR="D:/webrtc/src/third_party/boringssl/src/include" ^
+  -DOPENSSL_LIBRARIES="D:/webrtc/src/out/Default/obj/webrtc.lib"
+  
+  
+  编译libmediasoup-client
+  cmake -G Ninja ^
+  -DCMAKE_MAKE_PROGRAM="D:/webrtc/src/buildtools/win/ninja.exe" ^
+  -DCMAKE_C_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_CXX_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_BUILD_TYPE=Release ^
+  -DLIBWEBRTC_INCLUDE_PATH="D:/webrtc/src" ^
+  -DLIBWEBRTC_BINARY_PATH="D:/webrtc/src/out/Default/obj" ^
+  -DBUILD_SHARED_LIBS=OFF ^
+  -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded" ^
+  ..
+  
+  
+  
+  cmake -G Ninja ^
+  -DCMAKE_MAKE_PROGRAM="D:/webrtc/src/buildtools/win/ninja.exe" ^
+  -DCMAKE_C_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_CXX_COMPILER="D:/webrtc/src/third_party/llvm-build/Release+Asserts/bin/clang-cl.exe" ^
+  -DCMAKE_BUILD_TYPE=Release ^
+  -DMSC_DIR="D:/work/work_code/libmediasoupclient" ^
+  -DMSC_LIB="D:/work/work_code/libmediasoupclient/build/mediasoupclient.lib" ^
+  -DLIBWEBRTC_INCLUDE_PATH="D:/webrtc/src" ^
+  -DLIBWEBRTC_BINARY_PATH="D:/webrtc/src/out/Default/obj" ^
+  -DSDPTRANSFORM_LIB="D:/work/work_code/libmediasoupclient/build/_deps/libsdptransform-build/sdptransform.lib" ^
+  -DVM_HW_INJECT=ON ^
+  ..
+  
+  .\client.exe --url wss://127.0.0.1:4443 --origin "https://172.18.58.129:4443" --room dev
